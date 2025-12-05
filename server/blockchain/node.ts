@@ -3,6 +3,7 @@ import { TransactionBuilder } from "./transaction";
 import { BlockchainCrypto, generateMnemonic, deriveAddressFromPath } from "./crypto";
 import type { Block, Transaction, UTXO, Wallet, Address, NetworkStats, MiningStats } from "@shared/schema";
 import { BLOCKCHAIN_CONSTANTS } from "@shared/schema";
+import { blockchainDb } from "./db-storage";
 
 export class BlockchainNode {
   private chain: Block[] = [];
@@ -21,14 +22,61 @@ export class BlockchainNode {
   };
   private miningInterval: NodeJS.Timeout | null = null;
   private minerAddress: string | null = null;
+  private initialized: boolean = false;
 
   constructor() {
     this.initializeChain();
   }
 
-  private initializeChain(): void {
-    const genesis = BlockBuilder.createGenesisBlock();
-    this.chain.push(genesis);
+  private async initializeChain(): Promise<void> {
+    try {
+      const dbBlocks = await blockchainDb.getBlocks(1000);
+      if (dbBlocks.length > 0) {
+        this.chain = dbBlocks.reverse();
+        const mempoolTxs = await blockchainDb.getMempoolTxs();
+        this.mempool = mempoolTxs;
+        for (const block of this.chain) {
+          for (const tx of block.transactions) {
+            for (let i = 0; i < tx.outputs.length; i++) {
+              const output = tx.outputs[i];
+              const utxo: UTXO = {
+                txid: tx.txid,
+                vout: i,
+                address: output.address,
+                value: output.value,
+                scriptPubKey: output.scriptPubKey,
+                confirmations: this.chain.length - (block.height || 0),
+                spendable: true,
+              };
+              this.utxoSet.set(`${tx.txid}:${i}`, utxo);
+            }
+          }
+        }
+        for (const block of this.chain) {
+          for (const tx of block.transactions) {
+            for (const input of tx.inputs) {
+              if (input.txid !== "0".repeat(64)) {
+                this.utxoSet.delete(`${input.txid}:${input.vout}`);
+              }
+            }
+          }
+        }
+        const dbWallet = await blockchainDb.getFirstWallet();
+        if (dbWallet) {
+          this.wallets.set(dbWallet.id, dbWallet);
+        }
+      } else {
+        const genesis = BlockBuilder.createGenesisBlock();
+        this.chain.push(genesis);
+        await blockchainDb.saveBlock(genesis);
+      }
+      this.initialized = true;
+    } catch (error) {
+      console.log("Database not available, using in-memory storage");
+      const genesis = BlockBuilder.createGenesisBlock();
+      this.chain.push(genesis);
+      this.initialized = true;
+    }
   }
 
   getChain(): Block[] {
@@ -150,6 +198,7 @@ export class BlockchainNode {
     };
 
     this.wallets.set(wallet.id, wallet);
+    blockchainDb.saveWallet(wallet).catch(console.error);
     return wallet;
   }
 
@@ -307,6 +356,7 @@ export class BlockchainNode {
     }
 
     this.mempool.push(tx);
+    blockchainDb.addMempoolTx(tx).catch(console.error);
     this.updateWalletBalances();
 
     return tx;
@@ -391,6 +441,7 @@ export class BlockchainNode {
       for (const input of tx.inputs) {
         if (input.txid !== "0".repeat(64)) {
           this.utxoSet.delete(`${input.txid}:${input.vout}`);
+          blockchainDb.spendUtxo(input.txid, input.vout, tx.txid).catch(console.error);
         }
       }
 
@@ -413,6 +464,7 @@ export class BlockchainNode {
       const index = this.mempool.findIndex((t) => t.txid === tx.txid);
       if (index !== -1) {
         this.mempool.splice(index, 1);
+        blockchainDb.removeMempoolTx(tx.txid).catch(console.error);
       }
     }
 
@@ -421,6 +473,7 @@ export class BlockchainNode {
     }
 
     this.chain.push(block);
+    blockchainDb.saveBlock(block).catch(console.error);
     this.updateWalletBalances();
   }
 
