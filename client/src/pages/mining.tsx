@@ -32,10 +32,18 @@ export default function MiningPage() {
 
   const toggleMiningMutation = useMutation({
     mutationFn: async (action: "start" | "stop") => {
+      // Find the first address that belongs to a wallet
       const minerAddress = wallet?.addresses[0]?.address;
-      if (!minerAddress && action === "start") {
-        throw new Error("Create a wallet first to receive mining rewards");
+      
+      if (action === "start") {
+        if (!wallet) {
+          throw new Error("Please create a wallet first to receive mining rewards.");
+        }
+        if (!minerAddress) {
+          throw new Error("Your wallet must have at least one address to receive rewards.");
+        }
       }
+      
       return apiRequest("POST", `/api/mining/${action}`, { minerAddress });
     },
     onSuccess: (_, action) => {

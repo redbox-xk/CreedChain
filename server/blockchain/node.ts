@@ -251,8 +251,16 @@ export class BlockchainNode {
 
   updateWalletBalances(): void {
     for (const wallet of this.wallets.values()) {
+      let walletModified = false;
       for (const address of wallet.addresses) {
-        address.balance = this.getAddressBalance(address.address);
+        const newBalance = this.getAddressBalance(address.address);
+        if (address.balance !== newBalance) {
+          address.balance = newBalance;
+          walletModified = true;
+        }
+      }
+      if (walletModified) {
+        blockchainDb.saveWallet(wallet).catch(console.error);
       }
     }
   }
@@ -437,7 +445,9 @@ export class BlockchainNode {
   }
 
   private addMinedBlock(block: Block): void {
+    // 1. Process UTXOs for all transactions in the block
     for (const tx of block.transactions) {
+      // Spend inputs
       for (const input of tx.inputs) {
         if (input.txid !== "0".repeat(64)) {
           this.utxoSet.delete(`${input.txid}:${input.vout}`);
@@ -445,6 +455,7 @@ export class BlockchainNode {
         }
       }
 
+      // Create new outputs
       for (let i = 0; i < tx.outputs.length; i++) {
         const output = tx.outputs[i];
         const utxo: UTXO = {
@@ -460,6 +471,8 @@ export class BlockchainNode {
       }
     }
 
+    // 2. Remove confirmed transactions from mempool
+    // Skip coinbase (first transaction) as it's not in mempool
     for (const tx of block.transactions.slice(1)) {
       const index = this.mempool.findIndex((t) => t.txid === tx.txid);
       if (index !== -1) {
@@ -468,12 +481,16 @@ export class BlockchainNode {
       }
     }
 
-    for (const [key, utxo] of this.utxoSet) {
+    // 3. Increment confirmations for all UTXOs in the set
+    for (const utxo of this.utxoSet.values()) {
       utxo.confirmations++;
     }
 
+    // 4. Update chain and persist
     this.chain.push(block);
     blockchainDb.saveBlock(block).catch(console.error);
+
+    // 5. Update wallet balances and persist changes
     this.updateWalletBalances();
   }
 
