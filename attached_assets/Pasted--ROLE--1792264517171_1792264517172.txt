@@ -1,0 +1,461 @@
+═══════════════════════════════════════════════════════════════════════
+ROLE
+═══════════════════════════════════════════════════════════════════════
+You are the Lead Blockchain Engineer, Security Architect, Distributed
+Systems Engineer, and DevOps Lead for CreedChain. You have AUTONOMY
+to make any architectural decisions required to hit the definition of
+done below. You may add, remove, or refactor any file, install any
+dependency, write any migration, and alter any config. You are expected
+to work end-to-end without asking for approval between phases, but you
+MUST print a short status report at the end of each phase before
+starting the next.
+
+═══════════════════════════════════════════════════════════════════════
+PROJECT CONTEXT (current state — audited)
+═══════════════════════════════════════════════════════════════════════
+Platform: CreedChain — a full-stack TypeScript blockchain platform
+Repo: https://github.com/redbox-xk/CreedChain
+Stack: React (client) + Express (server) + Drizzle ORM + PostgreSQL +
+  Zod schemas + shared types (shared/schema.ts)
+Model: UTXO-based chain with blocks, transactions, mempool, wallets
+Status: Builds and runs, but is effectively a single-node centralized
+  demo dressed as a blockchain
+
+Known critical defects (must be fixed in this build):
+  C1. No P2P networking — the "chain" is a single node. No gossip,
+      consensus no peer discovery, no consensus with other nodes.
+  C2. Private keys and mnemonics stored in plaintext in the wallets
+      table. No encryption at rest. No KMS integration.
+  C3. Mining is simulated — no real PoW difficulty adjustment, no
+      cumulative-difficulty fork choice, no network.
+  C4. No authentication / authorization. API is fully open. Anyone
+      can mine, create wallets, and submit transactions.
+  C5. Transaction validation is superficial — Zod shape check only.
+      No signature verification, no UTXO existence check, no
+      double-spend protection before mempool insertion.
+  C6. Blocks loaded from DB are not re-validated (merkle root, PoW,
+      tx signatures). A corrupted DB poisons the chain.
+  C7. Zero tests. No CI pipeline. No lint/typecheck gate.
+  C8. No observability — console.log only. No metrics, no tracing,
+      no structured logs.
+  C9. No scalability plan — full chain is loaded into memory on
+      startup. Memory grows unbounded. No pruning, no SPV.
+  C10. Documentation is minimal; no threat model, no runbooks, no
+       API reference.
+
+═══════════════════════════════════════════════════════════════════════
+MISSION
+═══════════════════════════════════════════════════════════════════════
+Transform CreedChain from a single-node demo into a production-grade,
+multi-node, cryptographically secure blockchain platform that scores
+>= 9.9/10 across:
+
+  Consensus | P2P Networking | Cryptography | Security | API
+  Scalability | Storage | Testing | Observability | Documentation
+
+Full scope is authorized. Work phase-by-phase; do not skip phases; do
+not stub implementations (no `// TODO`, no placeholder logic, no fake
+proofs, no mock signatures in production paths).
+
+═══════════════════════════════════════════════════════════════════════
+NON-NEGOTIABLE ENGINEERING RULES
+═══════════════════════════════════════════════════════════════════════
+1.  Every transaction entering the mempool MUST pass full validation:
+      - Inputs reference UTXOs that exist and are unspent
+      - Each input's scriptSig is a valid ECDSA signature by the
+        owner of the referenced UTXO
+      - sum(inputs) >= sum(outputs) + fee
+      - No duplicate inputs (within tx and across mempool)
+    Invalid transactions are rejected with a specific error code.
+2.  Every block appended to the chain MUST be validated:
+      - Merkle root matches all transaction hashes
+      - Header hash < current difficulty target
+      - Coinbase reward <= block subsidy + sum(fees)
+      - All transactions pass rule #1
+      - Parent hash matches the current chain tip (or triggers a
+        valid reorg path per rule #6)
+3.  All private keys and mnemonics MUST be encrypted at rest using
+    AES-256-GCM with a key sourced from env/KMS. No plaintext keys
+    in the DB, ever. No plaintext keys in logs, ever.
+4.  Every write endpoint (mine, send, create-wallet, admin actions)
+    MUST require authentication (JWT). Public read endpoints may
+    remain unauthenticated, but MUST be rate-limited.
+5.  Every external call (peer gossip, DB) MUST have a timeout and a
+    bounded retry policy with structured error logging.
+6.  Reorg handling MUST follow longest-cumulative-difficulty rule.
+    Reorgs deeper than N blocks (config, default 12) MUST be flagged
+    as critical alerts and refuse the reorg until operator override.
+7.  No hardcoded secrets. Use process.env everywhere. A `validateEnv`
+    module MUST fail-fast at boot if required keys are missing.
+8.  Every new module ships with: unit test + integration test +
+    docs entry + CHANGELOG.md line.
+9.  No console.log in production paths — use the structured logger.
+10. Any file > 400 LOC must be split by concern.
+11. All crypto operations MUST use well-audited libraries (no
+    hand-rolled curves, no custom KDFs). Use secp256k1 (via
+    @noble/secp256k1 or elliptic), @noble/hashes for SHA-256,
+    @scure/bip32, @scure/bip39.
+12. Consensus-critical code paths MUST have >= 90% line coverage and
+    a property-based test suite.
+
+═══════════════════════════════════════════════════════════════════════
+DELIVERABLES BY PHASE
+═══════════════════════════════════════════════════════════════════════
+
+──────────────────────────────────────────────────────────────────────
+PHASE 1 — CRYPTOGRAPHIC HARDENING & VALIDATION (unblocks everything)
+──────────────────────────────────────────────────────────────────────
+1.1 Key Vault
+    - server/blockchain/keyvault.ts
+        * encrypt(plaintext) / decrypt(ciphertext) using AES-256-GCM.
+        * Master key from process.env.MASTER_KEY (64 hex chars).
+        * Every wallet row stores { iv, ciphertext, tag }, never raw.
+    - Migration: encrypt all existing wallets; add columns iv, ciphertext,
+      tag; drop mnemonic and private_key columns.
+    - Add a rotation script scripts/rotate-master-key.ts that re-encrypts
+      all wallet rows under a new master key.
+    - NO wallet content is ever serialized into logs or API responses
+      (except a one-time reveal endpoint for the authenticated owner,
+      rate-limited to 1/min).
+
+1.2 Transaction Validation Engine
+    - server/blockchain/validation/transaction.ts
+        * verifyTransaction(tx, utxoView, mempoolView): ValidationResult
+        * Checks: UTXO existence, unspent, signature match,
+          double-spend within tx, double-spend against mempool,
+          value conservation, fee >= min_fee_per_kb * size_kb.
+    - UTXO view service (server/blockchain/utxo.ts):
+        * getUtxo(outpoint): UTXO | null
+        * spend(outpoint): void  // called only after block acceptance
+        * Efficient lookup by (txid, vout); indexed in DB.
+    - Integrate into POST /api/transaction/send: reject with 400 +
+      specific error code on any failure. Do NOT add to mempool on fail.
+    - Add a mempool admission policy: size cap (config), fee-based
+      eviction, per-address rate cap.
+
+1.3 Block Validation Engine
+    - server/blockchain/validation/block.ts
+        * verifyBlock(block, prevBlock, utxoView): ValidationResult
+        * Checks: parent linkage, timestamp window (±2h), merkle root,
+          header hash < target, coinbase reward <= subsidy + fees,
+          all tx pass verifyTransaction, no duplicate txids.
+    - Apply verifyBlock on EVERY code path that appends a block:
+      mining, peer gossip receipt, DB rehydration at startup.
+    - Startup: re-validate the last N (default 100) blocks and refuse
+      to boot on violation (log + alert).
+
+1.4 Real PoW Mining
+    - server/blockchain/mining.ts
+        * mineBlock(header, target): nonce-search loop with
+          @noble/hashes double-SHA256.
+        * Difficulty retarget every 2016 blocks (config) to maintain
+          ~10s block time; clamp to [minDifficulty, maxDifficulty].
+        * Persist cumulative chain-work alongside each block.
+    - Remove any "simulated" mining loops.
+
+PHASE 1 ACCEPTANCE:
+  - `grep -ri "private_key\|mnemonic" server/ --include='*.ts'` only
+    matches keyvault.ts and reveal endpoint.
+  - A curl with a tampered signature is rejected with error code
+    TX_INVALID_SIG.
+  - A double-spend attempt within the same block is rejected with
+    TX_DOUBLE_SPEND.
+  - A block with a wrong merkle root is rejected with BLOCK_BAD_MERKLE.
+  - Unit tests for validation module pass at >= 90% coverage.
+
+──────────────────────────────────────────────────────────────────────
+PHASE 2 — AUTH, RATE LIMITING, API SURFACE
+──────────────────────────────────────────────────────────────────────
+2.1 Auth
+    - Add POST /api/auth/register, /api/auth/login (email + password,
+      argon2id hashing).
+    - Issue JWTs (15m access + 7d refresh). Store refresh tokens hashed.
+    - Middleware requireAuth for all write endpoints:
+        POST /api/transaction/send
+        POST /api/mine
+        POST /api/wallet/create
+        POST /api/admin/*
+    - Middleware requireRole('admin') for admin endpoints.
+    - Rate-limit endpoints by IP and by user:
+        /api/auth/*             : 10 req/min/IP
+        /api/transaction/send   : 30 req/min/user
+        /api/mine               : 5 req/min/user
+        /api/wallet/*           : 20 req/min/user
+
+2.2 API contract hardening
+    - Every endpoint accepts a Zod-validated body; reject with 422 +
+      field-level errors on shape failure.
+    - Add OpenAPI spec generated from Zod schemas (zod-to-openapi),
+      served at /api/docs (Swagger UI).
+    - Add request IDs (X-Request-Id header) threaded through logs.
+    - Every endpoint returns { data } | { error: { code, message } }.
+
+2.3 Sensitive endpoint hardening
+    - GET /api/wallet/:id/private-key (owner-only, rate 1/min) returns
+      the decrypted mnemonic once; logs every access to AuditLog.
+    - POST /api/admin/prune (admin-only) triggers manual prune.
+
+PHASE 2 ACCEPTANCE:
+  - Unauthenticated POST /api/mine returns 401.
+  - Authenticated non-admin POST /api/admin/prune returns 403.
+  - 11th login attempt in a minute returns 429.
+  - OpenAPI spec renders at /api/docs with all endpoints.
+
+──────────────────────────────────────────────────────────────────────
+PHASE 3 — P2P NETWORK & CONSENSUS
+──────────────────────────────────────────────────────────────────────
+3.1 libp2p node
+    - server/p2p/node.ts
+        * Create libp2p node with TCP, noise encryption, mplex muxer.
+        * Peer discovery: mDNS (local dev) + configurable bootstrap list
+          (env: BOOTSTRAP_PEERS=csv).
+        * Identity persisted to disk (server/data/p2p-identity.key) and
+          encrypted with the master key.
+    - server/p2p/protocols/
+        * gossip-blocks.ts: broadcast new blocks; receive → verifyBlock
+          → append or trigger reorg.
+        * gossip-tx.ts: broadcast mempool txs; receive → verifyTransaction
+          → admit to mempool.
+        * sync-headers.ts: peer handshake exchanging tip height + hash;
+          if peer ahead, request block range (batched, max 500/request).
+        * sync-blocks.ts: range-fetch with validation per block.
+
+3.2 Fork choice & reorg
+    - server/blockchain/chain.ts
+        * Track cumulative chain-work, not just height.
+        * On peer block with higher work: attempt reorg — walk back to
+          common ancestor, validate new path, swap chain tip atomically
+          inside a DB transaction.
+        * Refuse reorg if depth > MAX_REORG_DEPTH (default 12); emit
+          CRITICAL alert + halt gossip acceptance until operator
+          intervention.
+    - Add AuditLog entries for every reorg (depth, from, to, reason).
+
+3.3 Sync strategy
+    - On startup: connect to bootstrap peers, run sync-headers; if
+      behind, sync-blocks, then resume gossip.
+    - Periodic anti-entropy: every 60s exchange tips with all peers;
+      if any peer has higher work, sync.
+    - Reject blocks with timestamps > 2h in the future or > 2h older
+      than the median of the last 11 blocks.
+
+3.4 Difficulty retarget
+    - Every 2016 blocks: new_target = old_target * (actual_time / expected_time)
+      clamped to [target * 0.25, target * 4].
+    - Enforce retarget rule in verifyBlock: peers cannot submit a
+      block with a target that violates the retarget math.
+
+PHASE 3 ACCEPTANCE:
+  - Two CreedChain nodes started locally discover each other via mDNS
+    and stay in sync (both tips advance together after mining on
+    either node).
+  - Mining on node A appears on node B within 2 seconds.
+  - A fork induced by disconnecting and mining on both sides is
+    resolved by longest-work rule when reconnected; AuditLog shows
+    reorg entry.
+  - A peer sending a malformed block is disconnected after N violations.
+
+──────────────────────────────────────────────────────────────────────
+PHASE 4 — SCALABILITY & STORAGE
+──────────────────────────────────────────────────────────────────────
+4.1 Storage
+    - Confirm PostgreSQL is used for blocks, transactions, UTXOs,
+      mempool, and indexes.
+    - Mandatory indexes:
+        blocks(height) UNIQUE
+        blocks(hash) UNIQUE
+        blocks(parent_hash)
+        transactions(txid) UNIQUE
+        transactions(block_hash)
+        utxos(txid, vout) UNIQUE, utxos(spent) WHERE spent = false
+        mempool(fee DESC, receive_time ASC)
+    - Add a ChainState singleton table: tip_hash, tip_height,
+      cumulative_work, updated_at.
+
+4.2 Startup performance
+    - Do NOT load full chain into memory. Load only:
+        * ChainState tip
+        * Last N blocks (default 100) for reorg window
+        * UTXO set for the tip (or lazy-load per request)
+    - Lazy UTXO resolution: on tx verification, look up referenced
+      UTXOs on demand via DB.
+
+4.3 Pruning
+    - server/blockchain/prune.ts:
+        * Blocks older than PRUNE_DEPTH (default 2000) are eligible
+          for header-only storage: keep header + merkle root, drop
+          body. Store body in cold storage (S3 or disk archive).
+        * Expose GET /api/spv/proof/:txid returning { header, branch }
+          for any pruned tx.
+
+4.4 Caching
+    - Add Redis (env REDIS_URL). Cache:
+        * networkStats (10s TTL)
+        * latest 20 blocks (5s TTL)
+        * tx lookup by txid (60s TTL, invalidated on inclusion)
+
+4.5 SPV wallet library
+    - packages/spv-client/ — a minimal TypeScript library that:
+        * Fetches headers from /api/spv/headers
+        * Verifies header chain locally
+        * Verifies tx inclusion via merkle proof from /api/spv/proof/:txid
+
+PHASE 4 ACCEPTANCE:
+  - Load a chain of 10,000 synthetic blocks; server boot < 3s;
+    RSS < 300MB.
+  - GET /api/spv/proof/:txid for an old pruned tx returns a valid
+    proof, and packages/spv-client verifies it against local headers.
+  - Redis cache hits > 70% on networkStats in a 1-minute load test.
+
+──────────────────────────────────────────────────────────────────────
+PHASE 5 — OBSERVABILITY, TESTING, CI/CD
+──────────────────────────────────────────────────────────────────────
+5.1 Observability
+    - Replace all console.log with pino; every log line includes
+      { req_id, user_id?, duration_ms, module }.
+    - Prometheus metrics at /metrics:
+        creedchain_block_height
+        creedchain_cumulative_work
+        creedchain_mempool_size
+        creedchain_peer_count
+        creedchain_hashes_per_second
+        creedchain_tx_validation_failures_total{reason}
+        creedchain_gossip_latency_seconds (histogram)
+    - Sentry initialized for both server and client.
+    - Health: /api/health returning { db, redis, peers, tip_height }.
+
+5.2 Test pyramid
+    - Unit (Vitest): validation, keyvault, mining, merkle, reorg math.
+    - Property-based (fast-check):
+        * Any block that passes verifyBlock also produces a stable
+          chain extension (no false positives).
+        * Signature verify is deterministic for the same input.
+    - Integration (Supertest + Docker Postgres):
+        * Full mine → gossip → receive → accept flow across two
+          in-process nodes.
+        * Auth flows: register, login, mine, 401/403 cases.
+    - E2E (Playwright):
+        * Explorer UI: home stats, block detail, tx detail, wallet
+          create, send tx (test fixture).
+    - Load (k6):
+        * 200 VUs / 5 min on /api/blocks and /api/transaction/send
+          (with pre-funded UTXOs); assert p95 < 200ms, error rate < 0.1%.
+    - Security:
+        * npm audit fails on high+critical.
+        * Semgrep rules in .semgrep.yml (no eval, no child_process,
+          no plaintext keys).
+        * Test that a crafted block with a valid hash but a wrong
+          merkle root is rejected.
+
+5.3 CI/CD
+    - .github/workflows/ci.yml:
+        * lint (eslint), typecheck (tsc --noEmit), test (vitest),
+          build.
+        * Start ephemeral Postgres + Redis services; run integration
+          and property tests.
+        * Enforce coverage thresholds: statements 85%, branches 80%,
+          lines 85% for server/, higher (90/85/90) for
+          server/blockchain/.
+        * Fail on any dangling `console.log` in server/.
+    - .github/workflows/nightly.yml:
+        * Run load test (k6) against staging; publish report artifact.
+        * Re-run security scans; open issue if new highs found.
+
+5.4 Hardening (must all be true at the end)
+    [ ] HSTS, CSP, X-Frame-Options, X-Content-Type-Options on the
+        server.
+    [ ] Rate limits verified by test.
+    [ ] Every write endpoint requires JWT.
+    [ ] Every sensitive read (private key reveal) rate-limited + logged.
+    [ ] Secrets live in a vault, not committed .env.
+    [ ] Dependency pinning via lockfile; Renovate configured.
+    [ ] No plaintext keys in DB, in logs, in API responses (other
+        than owner-only one-time reveal).
+
+PHASE 5 ACCEPTANCE:
+  - CI green on a synthetic PR; a red PR (deliberate failure) blocks
+    merge.
+  - Grafana dashboard (if provisioned) shows block_height and
+    peer_count updating live from staging.
+  - Property tests run 1000 iterations without a false positive.
+
+──────────────────────────────────────────────────────────────────────
+PHASE 6 — DOCUMENTATION & FINAL REPORTING
+──────────────────────────────────────────────────────────────────────
+6.1 Docs (all in docs/)
+    - ARCHITECTURE.md — node topology, gossip sequence, reorg state
+      machine, data flow diagram, failure modes & mitigations.
+    - CONSENSUS.md — PoW rule, difficulty retarget math, fork-choice
+      rule, reorg policy, security assumptions (51% attack cost model).
+    - THREAT_MODEL.md — attacker capabilities (MITM, eclipse, 51%,
+      DoS, key theft), defenses in place, residual risks.
+    - API.md — full reference (or generate from OpenAPI).
+    - RUNBOOKS.md — how to: bootstrap a new node, add a bootstrap
+      peer, rotate master key, replay from cold storage, respond to
+      a deep reorg, restore DB from backup.
+    - SECURITY.md — key management, secret rotation schedule, audit
+      log schema, disclosure policy.
+    - CHANGELOG.md — Keep a Changelog.
+    - CONTRIBUTING.md — branch conventions, PR checklist, commit
+      message format.
+    - MIGRATION.md — one-time scripts to encrypt legacy wallets,
+      backfill ChainState, add indexes.
+
+6.2 Secrets required
+    - docs/SECRETS_REQUIRED.md listing every env key: purpose,
+      provider, minimum permissions. Includes MASTER_KEY,
+      JWT_SECRET, DATABASE_URL, REDIS_URL, SENTRY_DSN,
+      BOOTSTRAP_PEERS.
+
+6.3 Final report
+    - Print the FINAL SCORECARD (10 areas, before/after).
+    - Print "READY FOR PRODUCTION: YES/NO" with a one-line verdict.
+    - Print a diff summary: LOC added/removed, files created,
+      migrations added, deps added.
+
+═══════════════════════════════════════════════════════════════════════
+OUTPUT CONTRACT (how you must report progress)
+═══════════════════════════════════════════════════════════════════════
+After EACH phase you must print:
+
+  ┌─ PHASE N STATUS ────────────────────────────────────────────┐
+  │ Files created:      <list>                                 │
+  │ Files modified:     <list>                                 │
+  │ Files deleted:      <list>                                 │
+  │ Migrations applied: <list>                                 │
+  │ New deps installed: <list>                                 │
+  │ Tests added:        <count> (unit / integration / e2e)     │
+  │ Coverage delta:     <before %> → <after %>                 │
+  │ Acceptance checks:  <PASS/FAIL per item>                   │
+  │ Blockers:           <none | list>                          │
+  │ Next phase ready:   <yes/no>                               │
+  └────────────────────────────────────────────────────────────┘
+
+At the very end, print the FINAL SCORECARD table (10 areas, before/after)
+and a single-line "READY FOR PRODUCTION: YES/NO" verdict.
+
+═══════════════════════════════════════════════════════════════════════
+ALLOWANCES (you are explicitly authorized to)
+═══════════════════════════════════════════════════════════════════════
+- Install any npm package, Python lib, or system tool required.
+- Create, modify, or delete any file in the repo.
+- Add or remove dependencies from package.json.
+- Add or modify database migrations.
+- Refactor or rewrite any existing module that blocks the mission.
+- Split large files, extract hooks, extract utilities.
+- Add TypeScript to any file touched during this build (already TS).
+- Modify CI workflows, add new workflows.
+- Modify Drizzle schemas and generate migrations.
+- Delete dead code, dead files, dead comments.
+- Add new top-level packages/ subdirectories (e.g. spv-client).
+- Introduce libp2p, Redis, and any crypto library listed above.
+- Require additional secrets from the operator via
+  docs/SECRETS_REQUIRED.md.
+
+═══════════════════════════════════════════════════════════════════════
+START
+═══════════════════════════════════════════════════════════════════════
+Begin Phase 1. Do not skip. Do not stub. Report status at each phase
+boundary. If any secret is missing that blocks a phase, write
+docs/SECRETS_REQUIRED.md, halt that phase only, and proceed to the
+next unblocked phase. Complete every phase that can be completed.
