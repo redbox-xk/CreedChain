@@ -1,8 +1,8 @@
-# CREEDchain - Bitcoin-like Blockchain Platform
+# Nexa Pay - Crypto Payments Platform
 
 ## Overview
 
-CREEDchain is a Bitcoin-like blockchain platform featuring Proof-of-Work mining, UTXO transaction model, HD wallet system, and a comprehensive blockchain explorer. The application provides real-time blockchain network monitoring, wallet management, transaction tracking, and mining capabilities through a modern web interface.
+Nexa Pay is a blockchain-based crypto payments platform featuring Proof-of-Work mining, a UTXO transaction model, an HD wallet system, and a blockchain explorer. The application provides real-time network monitoring, wallet management, transaction tracking, and mining capabilities through a modern web interface.
 
 The platform implements core Bitcoin protocol concepts including:
 - Proof-of-Work consensus mechanism with adjustable difficulty

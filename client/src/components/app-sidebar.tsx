@@ -20,7 +20,6 @@ import {
   SidebarFooter,
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
-import logoImage from "@assets/IMG_0276_1764960201915.webp";
 
 const menuItems = [
   {
@@ -59,15 +58,15 @@ export function AppSidebar() {
         <Link href="/" className="flex items-center gap-3">
           <div className="relative">
             <img
-              src={logoImage}
-              alt="CREEDchain Logo"
-              className="h-10 w-10 rounded-full"
+              src="/brand/nexa-pay-icon-192.png"
+              alt="Nexa Pay"
+              className="h-10 w-10 rounded-xl"
             />
             <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-status-online border-2 border-sidebar" />
           </div>
           <div className="flex flex-col">
-            <span className="font-semibold text-lg tracking-tight">CREEDchain</span>
-            <span className="text-xs text-muted-foreground">Bitcoin-like Blockchain</span>
+            <span className="font-semibold text-lg tracking-tight">Nexa Pay</span>
+            <span className="text-xs text-muted-foreground">Crypto payments</span>
           </div>
         </Link>
       </SidebarHeader>

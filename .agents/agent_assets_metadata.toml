@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "tEl7jRqdpkLz4QQok9SYE"
+uri = "file://client/public/brand/nexa-pay-logo.png"
+type = "image"
+title = "Nexa Pay logo"
+description = "Image-derived Nexa Pay wordmark and chain-and-key mark."
+logical_id = "cbb57824-8d26-4248-8950-2ec17d36605c"
+content_hash = "sha256:c0405913067f8fb8002d1a5152926d3515423257eae3b4e26cdd80208f5897ef"
+size = 105838
+mtime_ms = 1794849366892
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:9f6224bb-3a15-4737-ae41-1e0628f1874d/cbb57824-8d26-4248-8950-2ec17d36605c/a4032c2a-3816-4c7e-a0d8-b0bc268f4929"
+storage_version_token = "1794849483348305"
+content_type = "image/png"

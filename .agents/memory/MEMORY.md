@@ -1,0 +1,1 @@
+- [Nexa Pay branding](nexa-pay-branding.md) — Keep the app brand separate from the existing CREED token and chain data.
