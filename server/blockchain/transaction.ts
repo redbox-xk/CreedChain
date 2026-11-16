@@ -82,31 +82,15 @@ export class TransactionBuilder {
     return BlockchainCrypto.doubleSha256(data);
   }
 
-  static validateTransaction(tx: Transaction, utxoSet: Map<string, UTXO>): boolean {
-    if (tx.inputs.length === 0 || tx.outputs.length === 0) {
-      return false;
-    }
-
-    if (tx.inputs.length === 1 && tx.inputs[0].txid === "0".repeat(64)) {
-      return true;
-    }
-
-    let inputSum = 0;
-    for (const input of tx.inputs) {
-      const utxoKey = `${input.txid}:${input.vout}`;
-      const utxo = utxoSet.get(utxoKey);
-      if (!utxo) {
-        return false;
-      }
-      inputSum += utxo.value;
-    }
-
-    const outputSum = tx.outputs.reduce((sum, out) => sum + out.value, 0);
-    
-    if (outputSum > inputSum) {
-      return false;
-    }
-
-    return true;
+  static validateTransaction(_tx: Transaction, _utxoSet: Map<string, UTXO>): boolean {
+    /*
+     * Fail closed. The current transaction format does not carry a verifiable
+     * public key and script engine, and the previous verifier accepted every
+     * signature. Do not accept coinbase transactions from the public mempool.
+     * Re-enable only after canonical serialization, ownership proofs, strict
+     * value/range checks, duplicate-input detection and consensus validation
+     * have all been implemented and tested.
+     */
+    return false;
   }
 }
