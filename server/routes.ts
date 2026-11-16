@@ -134,8 +134,8 @@ export async function registerRoutes(
         id: wallet.id,
         name: wallet.name,
         createdAt: wallet.createdAt,
-        addresses: wallet.addresses.map(({ address, publicKey, path, label, balance }) => ({
-          address, publicKey, path, label, balance,
+        addresses: wallet.addresses.map(({ address, path, label, balance }) => ({
+          address, path, label, balance,
         })),
       });
     } catch {
