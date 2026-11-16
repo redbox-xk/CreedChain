@@ -125,7 +125,8 @@ export class BlockchainNode {
   }
 
   getRecentTransactions(limit: number = 10): Transaction[] {
-    return this.getAllTransactions().slice(0, limit);
+    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(100, Math.floor(limit))) : 10;
+    return this.getAllTransactions().slice(0, safeLimit);
   }
 
   getMempool(): Transaction[] {
@@ -165,8 +166,9 @@ export class BlockchainNode {
       circulatingSupply: totalSupply,
       blockReward: this.getBlockReward(latestBlock.height + 1),
       avgBlockTime,
-      peers: 1,
-      syncStatus: "synced",
+      // This implementation has no peer transport or synchronization protocol.
+      peers: 0,
+      syncStatus: "offline",
     };
   }
 
@@ -296,11 +298,13 @@ export class BlockchainNode {
   }
 
   sendTransaction(
-    fromAddress: string,
-    toAddress: string,
-    amount: number,
-    fee: number
+    _fromAddress: string,
+    _toAddress: string,
+    _amount: number,
+    _fee: number
   ): Transaction | null {
+    throw new Error("Transaction creation is disabled until audited signing and signature validation are implemented");
+    /* Disabled legacy implementation retained temporarily for migration review.
     let wallet: Wallet | undefined;
     let senderKey: string | undefined;
 
@@ -368,13 +372,16 @@ export class BlockchainNode {
     this.updateWalletBalances();
 
     return tx;
+    */
   }
 
   getMiningStats(): MiningStats {
     return { ...this.miningStats };
   }
 
-  startMining(minerAddress: string): void {
+  startMining(_minerAddress: string): void {
+    throw new Error("Mining is disabled until candidate blocks are validated against consensus rules");
+    /* Disabled legacy miner retained temporarily for migration review.
     if (this.miningActive) return;
 
     this.minerAddress = minerAddress;
@@ -383,6 +390,7 @@ export class BlockchainNode {
     this.miningStats.startTime = Date.now();
 
     this.mineNextBlock();
+    */
   }
 
   private async mineNextBlock(): Promise<void> {
