@@ -94,7 +94,7 @@ export function decodeTransaction(bytes: Buffer): CBPTransaction {
   return { version, networkId, timestamp, locktime, inputs, outputs, fee };
 }
 export function transactionId(tx: CBPTransaction): string {
-  return BlockchainCrypto.doubleSha256(Buffer.concat([Buffer.from("CREEDCHAIN/TX/V1\0", "ascii"), encodeTransaction(tx)]));
+  return BlockchainCrypto.doubleSha256(Buffer.concat([Buffer.from("CREEDCHAIN/TXID/V1\0", "ascii"), encodeTransactionBody(tx, false)]));
 }
 
 function encodeHeader(header: CBPBlockHeader): Buffer {
