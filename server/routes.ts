@@ -104,35 +104,12 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/transaction/send", (req, res) => {
-    try {
-      const validated = sendTransactionRequestSchema.safeParse(req.body);
-      
-      if (!validated.success) {
-        return res.status(400).json({ error: validated.error.errors[0].message });
-      }
-      
-      const { fromAddress, toAddress, amount, fee } = validated.data;
-      
-      // Convert amount to satoshis if needed
-      const amountSatoshis = Math.floor(amount * 100000000);
-      const feeSatoshis = Math.floor((fee || 0.0001) * 100000000);
-      
-      const transaction = blockchainNode.sendTransaction(
-        fromAddress,
-        toAddress,
-        amountSatoshis,
-        feeSatoshis
-      );
-      
-      if (!transaction) {
-        return res.status(400).json({ error: "Failed to create transaction" });
-      }
-      
-      res.json(transaction);
-    } catch (error: any) {
-      res.status(400).json({ error: error.message || "Failed to send transaction" });
-    }
+  app.post("/api/transaction/send", (_req, res) => {
+    // No transaction may be broadcast while signature verification is unavailable.
+    return res.status(503).json({
+      error: "Transaction broadcasting is temporarily disabled pending audited signature verification",
+      code: "CRYPTO_UNAVAILABLE",
+    });
   });
 
   // Mempool
@@ -146,54 +123,38 @@ export async function registerRoutes(
   });
 
   // Wallet
-  app.get("/api/wallet", (req, res) => {
+  app.get("/api/wallet", (_req, res) => {
     try {
       const wallet = blockchainNode.getFirstWallet();
-      
-      if (!wallet) {
-        return res.status(404).json({ error: "No wallet found" });
-      }
-      
-      res.json(wallet);
-    } catch (error) {
+      if (!wallet) return res.status(404).json({ error: "No wallet found" });
+
+      // Never serialize mnemonic phrases or private keys through an API.
+      res.setHeader("Cache-Control", "no-store");
+      res.json({
+        id: wallet.id,
+        name: wallet.name,
+        createdAt: wallet.createdAt,
+        addresses: wallet.addresses.map(({ address, publicKey, path, label, balance }) => ({
+          address, publicKey, path, label, balance,
+        })),
+      });
+    } catch {
       res.status(500).json({ error: "Failed to get wallet" });
     }
   });
 
-  app.post("/api/wallet", (req, res) => {
-    try {
-      const validated = createWalletRequestSchema.safeParse(req.body);
-      
-      if (!validated.success) {
-        return res.status(400).json({ error: validated.error.errors[0].message });
-      }
-      
-      const { name } = validated.data;
-      const wallet = blockchainNode.createWallet(name);
-      res.json(wallet);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to create wallet" });
-    }
+  app.post("/api/wallet", (_req, res) => {
+    return res.status(503).json({
+      error: "Wallet creation is disabled until audited BIP39/BIP32 key management is implemented",
+      code: "WALLET_CRYPTO_UNAVAILABLE",
+    });
   });
 
-  app.post("/api/wallet/address", (req, res) => {
-    try {
-      const wallet = blockchainNode.getFirstWallet();
-      
-      if (!wallet) {
-        return res.status(404).json({ error: "No wallet found" });
-      }
-      
-      const address = blockchainNode.addAddressToWallet(wallet.id);
-      
-      if (!address) {
-        return res.status(500).json({ error: "Failed to create address" });
-      }
-      
-      res.json(address);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to create address" });
-    }
+  app.post("/api/wallet/address", (_req, res) => {
+    return res.status(503).json({
+      error: "Address derivation is disabled until audited HD wallet support is implemented",
+      code: "WALLET_CRYPTO_UNAVAILABLE",
+    });
   });
 
   app.get("/api/wallet/transactions", (req, res) => {
@@ -221,20 +182,11 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/mining/start", (req, res) => {
-    try {
-      const validated = mineBlockRequestSchema.safeParse(req.body);
-      
-      if (!validated.success) {
-        return res.status(400).json({ error: validated.error.errors[0].message });
-      }
-      
-      const { minerAddress } = validated.data;
-      blockchainNode.startMining(minerAddress);
-      res.json({ success: true, message: "Mining started" });
-    } catch (error) {
-      res.status(500).json({ error: "Failed to start mining" });
-    }
+  app.post("/api/mining/start", (_req, res) => {
+    return res.status(503).json({
+      error: "Mining is disabled until block and transaction consensus validation is enforced",
+      code: "CONSENSUS_UNAVAILABLE",
+    });
   });
 
   app.post("/api/mining/stop", (req, res) => {
