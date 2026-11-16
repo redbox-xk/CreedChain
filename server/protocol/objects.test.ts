@@ -29,9 +29,9 @@ test("block encoding round-trips and has a stable header identifier", () => {
   assert.deepEqual(encodeBlock(decoded), bytes);
   assert.equal(blockId(block), blockId(decoded));
 });
-test("transaction IDs commit to witness/unlocking data", () => {
+test("transaction IDs exclude unlocking witness data", () => {
   const changed = { ...tx, inputs: [{ ...tx.inputs[0], unlockingData: Buffer.from([0xcc]) }] };
-  assert.notEqual(transactionId(tx), transactionId(changed));
+  assert.equal(transactionId(tx), transactionId(changed));
 });
 test("rejects malformed identifiers and trailing bytes", () => {
   assert.throws(() => encodeTransaction({ ...tx, inputs: [{ ...tx.inputs[0], txid: "abcd" }] }), BinaryProtocolError);
