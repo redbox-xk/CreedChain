@@ -54,7 +54,7 @@ function readCount(reader: BinaryReader, label: string): number {
   if (n > BigInt(MAX_ITEMS)) throw new BinaryProtocolError(`${label} count exceeds protocol limits`);
   return Number(n);
 }
-function encodeTransactionBody(tx: CBPTransaction): Buffer {
+function encodeTransactionBody(tx: CBPTransaction, includeUnlockingData = true): Buffer {
   assertCount(tx.inputs.length, "Input");
   assertCount(tx.outputs.length, "Output");
   const w = new BinaryWriter()
@@ -62,7 +62,7 @@ function encodeTransactionBody(tx: CBPTransaction): Buffer {
     .varUint(BigInt(tx.inputs.length));
   for (const input of tx.inputs) {
     w.fixed(assertHex32(input.txid, "Input txid"), 32)
-      .u32(input.vout).u32(input.sequence).bytes(input.unlockingData);
+      .u32(input.vout).u32(input.sequence);\n    if (includeUnlockingData) w.bytes(input.unlockingData);
   }
   w.varUint(BigInt(tx.outputs.length));
   for (const output of tx.outputs) {
