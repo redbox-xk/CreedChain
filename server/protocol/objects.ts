@@ -62,7 +62,8 @@ function encodeTransactionBody(tx: CBPTransaction, includeUnlockingData = true):
     .varUint(BigInt(tx.inputs.length));
   for (const input of tx.inputs) {
     w.fixed(assertHex32(input.txid, "Input txid"), 32)
-      .u32(input.vout).u32(input.sequence);\n    if (includeUnlockingData) w.bytes(input.unlockingData);
+      .u32(input.vout).u32(input.sequence);
+    if (includeUnlockingData) w.bytes(input.unlockingData);
   }
   w.varUint(BigInt(tx.outputs.length));
   for (const output of tx.outputs) {
