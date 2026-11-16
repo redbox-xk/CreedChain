@@ -35,6 +35,18 @@ Version (u16), network ID (u32), input count (varuint), ordered inputs, output c
 ### Block
 Version (u16), network ID (u32), height (u64), previous block ID (32 bytes), transaction commitment (32 bytes), state commitment (32 bytes), timestamp (u64), consensus payload length and bytes, then bounded transactions. Consensus payload and commitment rules must be finalized before activation.
 
+## Implemented object codec subset (still not consensus-active)
+
+`server/protocol/objects.ts` now defines explicit typed CBP objects and canonical encoders/decoders for transactions and blocks:
+- Transaction body: version u16, network ID u32, timestamp u64, locktime u64, bounded input count, ordered inputs (32-byte txid, output index u32, sequence u32, length-prefixed unlocking data), bounded output count, ordered outputs (amount u64, length-prefixed locking program), fee u64.
+- Block: length-prefixed canonical header, bounded transaction count, then length-prefixed canonical transaction bodies.
+- Header: version u16, network ID u32, height u64, previous block ID (32 bytes), transaction root (32 bytes), state root (32 bytes), timestamp u64, length-prefixed consensus data, nonce u64.
+- `transactionId()` hashes a domain-separated non-witness transaction preimage with double-SHA-256. Unlocking data is excluded from the txid preimage; the full transaction encoding still transports it.
+- `blockId()` hashes the domain-separated canonical header bytes. It does not validate proof-of-work or consensus.
+- Decoders reject trailing bytes, truncation, invalid fixed-size hashes, oversized collections and invalid field ranges through the primitive codec.
+
+The object codecs are deterministic serialization only. They are not wired into the legacy database, mempool, wallet, miner, or P2P service. They do not verify signatures, scripts, transaction economics, Merkle roots, state roots, proof-of-work, fork choice, or block validity. A successful encode/decode round trip is not evidence that a transaction or block is valid.
+
 ## Current implementation status
 server/protocol/binary.ts implements safe binary primitives only. It is not connected to the legacy chain, wallet, mining or database. Existing value-moving operations remain fail-closed.
 
